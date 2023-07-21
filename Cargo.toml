@@ -1,0 +1,18 @@
+[package]
+name = "vulkan-modern"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hassle-rs = "0.10.0"
+ash = { version = "0.37", default-features = false, features = ["linked", "debug"] }
+ash-window = "0.12"
+winit = "0.28"
+raw-window-handle = "0.5"
+anyhow = "1.0"
+gpu-allocator = "0.22.0"
+encase = "0.6.1"
+glam = { version = "0.24.1", features = ["bytemuck"] }
+bytemuck = { version = "1.13.1", features = ["derive", "bytemuck_derive"] }
