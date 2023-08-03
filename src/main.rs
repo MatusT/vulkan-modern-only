@@ -29,9 +29,9 @@ fn main() -> Result<()> {
     let mut dirty_swapchain = false;
 
     event_loop.run(move |event, _, control_flow| {
-        let app = &mut app;
+        control_flow.set_poll();
 
-        *control_flow = ControlFlow::Wait;
+        let app = &mut app;
 
         match event {
             Event::WindowEvent {
@@ -65,6 +65,7 @@ fn main() -> Result<()> {
             }
             // Event::LoopDestroyed => app.wait_gpu_idle(),
             _ => (),
-        }
+        }  
+        
     });
 }

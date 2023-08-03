@@ -1,7 +1,9 @@
-use ash::vk::{self, Buffer, CommandPoolResetFlags, BufferUsageFlags};
-use gpu_allocator::{vulkan::*, MemoryLocation};
-use bytemuck::{ Pod, Zeroable };
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
+
+use ash::vk::{self, Buffer, BufferUsageFlags, CommandPoolResetFlags};
+use bytemuck::{Pod, Zeroable};
 use glam;
+use gpu_allocator::{vulkan::*, MemoryLocation};
 pub struct BufferWithStaging {
     pub buffer: vk::Buffer,
     pub allocation: Allocation,
@@ -17,7 +19,10 @@ impl BufferWithStaging {
                 .create_buffer(
                     &vk::BufferCreateInfo::builder()
                         .size(512)
-                        .usage(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST)
+                        .usage(
+                            vk::BufferUsageFlags::STORAGE_BUFFER
+                                | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                        )
                         .build(),
                     None,
                 )
@@ -44,7 +49,10 @@ impl BufferWithStaging {
                 .create_buffer(
                     &vk::BufferCreateInfo::builder()
                         .size(512)
-                        .usage(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC)
+                        .usage(
+                            vk::BufferUsageFlags::STORAGE_BUFFER
+                                | vk::BufferUsageFlags::TRANSFER_SRC,
+                        )
                         .build(),
                     None,
                 )
@@ -64,13 +72,17 @@ impl BufferWithStaging {
 
             // Bind memory to the buffer
             device_fn
-                .bind_buffer_memory(staging_buffer, staging_allocation.memory(), staging_allocation.offset())
+                .bind_buffer_memory(
+                    staging_buffer,
+                    staging_allocation.memory(),
+                    staging_allocation.offset(),
+                )
                 .unwrap();
 
             BufferWithStaging {
                 buffer,
                 allocation,
-                
+
                 staging_buffer,
                 staging_allocation,
             }
@@ -164,6 +176,8 @@ pub struct Renderer {
     current_frame: usize,
 
     per_frame_data: Vec<PerFrameData>,
+
+    start_time: Duration,
 }
 
 impl Renderer {
@@ -189,8 +203,17 @@ impl Renderer {
 
         let mut per_frame_data = Vec::new();
         for i in 0..frames_in_flight {
-            per_frame_data.push(PerFrameData::new(&device, &mut allocator, queue_family_index));
+            per_frame_data.push(PerFrameData::new(
+                &device,
+                &mut allocator,
+                queue_family_index,
+            ));
         }
+
+        let start = SystemTime::now();
+        let start_time = start
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards");
 
         Renderer {
             instance,
@@ -207,6 +230,8 @@ impl Renderer {
             current_frame: 0,
 
             per_frame_data,
+
+            start_time
         }
     }
 
@@ -248,13 +273,24 @@ impl Renderer {
             self.device.reset_fences(&[in_flight_fence]).expect("");
 
             // Copy over data
+            let start = SystemTime::now();
+            let since_the_epoch = start
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards");
+            let t = since_the_epoch - self.start_time;
+            println!("{:?}", t.as_secs_f64().sin() as f32);
+
             let globals = Globals {
-                transform: glam::Mat4::IDENTITY,
+                transform: glam::Mat4::from_rotation_z(t.as_secs_f64().sin() as f32 + 1.0f32),
             };
+            
 
             let buffer = &mut frame_data.test_buffer;
-            let staging_map = buffer.staging_allocation.mapped_slice_mut().expect("Coult not map memory");
-            
+            let staging_map = buffer
+                .staging_allocation
+                .mapped_slice_mut()
+                .expect("Coult not map memory");
+
             {
                 let (left, right) = staging_map.split_at_mut(64);
 
@@ -292,7 +328,8 @@ impl Renderer {
                 ..Default::default()
             };
 
-            let command_buffer = self.device
+            let command_buffer = self
+                .device
                 .allocate_command_buffers(&allocate_command_buffer_create_info)
                 .expect("Could not allocate command buffers.")[0];
 
@@ -327,6 +364,15 @@ impl Renderer {
                 &[],
                 &[],
                 &[image_memory_barrier],
+            );
+
+            // Copy staing buffer to actual buffer
+            self.device.cmd_copy_buffer2(
+                command_buffer,
+                &vk::CopyBufferInfo2::builder()
+                    .src_buffer(buffer.staging_buffer)
+                    .dst_buffer(buffer.buffer)
+                    .regions(&[vk::BufferCopy2::builder().size(64).build()]),
             );
 
             let rendering_attachment_infos = vec![vk::RenderingAttachmentInfo::builder()
@@ -382,6 +428,8 @@ impl Renderer {
             self.shader_object_loader
                 .cmd_set_primitive_topology(command_buffer, vk::PrimitiveTopology::TRIANGLE_LIST);
 
+            let device_address = self.device.get_buffer_device_address(&vk::BufferDeviceAddressInfo::builder().buffer(buffer.buffer));
+            self.device.cmd_push_constants(command_buffer, self.shaders.layouts[0], vk::ShaderStageFlags::VERTEX, 0, bytemuck::bytes_of::<u64>(&device_address));
             self.device.cmd_draw(command_buffer, 3, 1, 0, 0);
 
             self.device.cmd_end_rendering(command_buffer);
@@ -423,11 +471,7 @@ impl Renderer {
                 .build()];
 
             self.device
-                .queue_submit(
-                    self.queue,
-                    &queue_submits,
-                    in_flight_fence,
-                )
+                .queue_submit(self.queue, &queue_submits, in_flight_fence)
                 .expect("");
 
             // Present

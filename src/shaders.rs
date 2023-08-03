@@ -5,6 +5,7 @@ use hassle_rs::compile_hlsl;
 
 pub struct Shaders {
     pub shaders: Vec<vk::ShaderEXT>,
+    pub layouts: Vec<vk::PipelineLayout>,
 }
 
 impl Shaders {
@@ -23,7 +24,8 @@ impl Shaders {
                 "vs_6_6",
                 &vec!["-spirv"],
                 &vec![],
-            ).expect("Should have been able to compile the shader");
+            )
+            .expect("Should have been able to compile the shader");
             let vertex_name = CString::new("vertexMain").expect("CString::new failed");
             let vertex = vk::ShaderCreateInfoEXT::builder()
                 .stage(vk::ShaderStageFlags::VERTEX)
@@ -31,6 +33,11 @@ impl Shaders {
                 .next_stage(vk::ShaderStageFlags::FRAGMENT)
                 .code_type(vk::ShaderCodeTypeEXT::SPIRV)
                 .code(&vertex_spirv)
+                .push_constant_ranges(&[vk::PushConstantRange {
+                    stage_flags: vk::ShaderStageFlags::VERTEX,
+                    offset: 0,
+                    size: 64,
+                }])
                 .name(&vertex_name)
                 .build();
 
@@ -41,7 +48,8 @@ impl Shaders {
                 "ps_6_6",
                 &vec!["-spirv"],
                 &vec![],
-            ).expect("Should have been able to compile the shader");
+            )
+            .expect("Should have been able to compile the shader");
             let fragment_name = CString::new("pixelMain").expect("CString::new failed");
             let fragment = vk::ShaderCreateInfoEXT::builder()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
@@ -56,7 +64,17 @@ impl Shaders {
                 .create_shaders(&[vertex, fragment], None)
                 .expect("Could not compile shaders");
 
-            Shaders { shaders }
+            let layouts = [
+                vk::PipelineLayoutCreateInfo::builder().push_constant_ranges(&[vk::PushConstantRange {
+                    stage_flags: vk::ShaderStageFlags::VERTEX,
+                    offset: 0,
+                    size: 64,
+                }]).build()
+            ];
+
+            let layouts: Vec<vk::PipelineLayout> = layouts.map(|create_info| device.create_pipeline_layout(&create_info, None).expect("")).to_vec();            
+
+            Shaders { shaders, layouts }
         }
     }
 }
